@@ -1,0 +1,45 @@
+name: TripleEdge Bot
+
+on:
+  # Poll every 10 minutes to handle /status, /setportfolio, /help commands
+  schedule:
+    - cron: '*/10 * * * *'
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+jobs:
+  bot-poll:
+    name: Poll Bot Commands
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Pull latest users.json
+        run: git pull
+
+      - name: Run bot (30 second poll window)
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          timeout 55 python bot_actions.py || true
+
+      - name: Commit updated users.json
+        run: |
+          git config user.name "TripleEdge Bot"
+          git config user.email "bot@tripleedge"
+          git add users.json
+          git diff --staged --quiet || git commit -m "Update users.json"
+          git push
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,0 +1,46 @@
+name: TripleEdge Signal
+
+on:
+  # Weekly auto-signal every Monday at 8:00 AM ET (13:00 UTC)
+  schedule:
+    - cron: '0 13 * * 1'
+
+  # On-demand bot polling — runs every 10 minutes to handle commands
+  # Comment this out if you only want the weekly signal
+  # schedule:
+  #   - cron: '*/10 * * * *'
+
+  # Allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Run mode'
+        required: true
+        default: 'weekly'
+        type: choice
+        options:
+          - weekly
+          - bot
+
+jobs:
+  weekly-signal:
+    name: Send Weekly Signal
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run weekly signal
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: python signal.py
