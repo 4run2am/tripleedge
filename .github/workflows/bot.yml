@@ -8,6 +8,9 @@ on:
   # Allow manual trigger
   workflow_dispatch:
 
+permissions:
+  contents: write   # required to commit and push users.json / bot_offset.json
+
 jobs:
   bot-poll:
     name: Poll Bot Commands
@@ -16,6 +19,8 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -25,21 +30,21 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Pull latest users.json
-        run: git pull
+      - name: Pull latest state
+        run: git pull --rebase
 
-      - name: Run bot (30 second poll window)
+      - name: Run bot (50 second poll window)
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: |
-          timeout 55 python bot_actions.py || true
+          TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
+        run: timeout 55 python bot_actions.py || true
 
-      - name: Commit updated users.json
+      - name: Commit updated state files
         run: |
           git config user.name "TripleEdge Bot"
           git config user.email "bot@tripleedge"
-          git add users.json
-          git diff --staged --quiet || git commit -m "Update users.json"
+          git add users.json bot_offset.json
+          git diff --staged --quiet || git commit -m "Bot state update [skip ci]"
           git push
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
