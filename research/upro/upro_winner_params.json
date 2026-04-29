@@ -1,0 +1,7 @@
+{
+  "regime_period": 65,
+  "reentry_instrument": "UPRO",
+  "reentry_period": 10,
+  "trailing_stop_pct": 0.22,
+  "regime_type": "weekly_sma"
+}

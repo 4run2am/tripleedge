@@ -1,14 +1,10 @@
 """
 TripleEdge — Telegram Bot Command Handler
 ==========================================
-Handles incoming commands from users:
-  /start        — register user
-  /status       — on-demand signal
-  /setportfolio — set personal portfolio value
-  /help         — command list
+Infinite-polling version for local testing.
+For production use bot_actions.py via GitHub Actions.
 
-Run via GitHub Actions on a polling schedule,
-or locally for testing.
+Handles: /start, /status, /setportfolio, /help
 """
 
 import os
@@ -31,7 +27,6 @@ def handle_command(chat_id, text, first_name):
     users = load_users()
     text  = text.strip()
 
-    # Auto-register user on any message
     if str(chat_id) not in users:
         users[str(chat_id)] = {"first_name": first_name, "portfolio_value": None}
         save_users(users)
@@ -39,22 +34,24 @@ def handle_command(chat_id, text, first_name):
     if text.startswith("/start"):
         msg = (
             f"👋 Welcome to *TripleEdge*, {first_name}!\n\n"
-            f"I send weekly TQQQ trend signals every Monday morning.\n\n"
+            f"I send weekly signals every Monday morning for two engines:\n"
+            f"  📈 *UPRO* (75%) — 3x S&P 500\n"
+            f"  🥇 *UGL* (25%) — 2x Gold\n\n"
             f"*Commands:*\n"
-            f"  /status — get current signal now\n"
-            f"  /setportfolio 10000 — set your starting capital\n"
+            f"  /status — get current signals now\n"
+            f"  /setportfolio 10000 — set your portfolio value\n"
             f"  /help — show all commands\n\n"
             f"_You're now registered for Monday signals._\n\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"_TripleEdge — TQQQ Trend System_"
+            f"_TripleEdge · UPRO + UGL · Not financial advice_"
         )
         send_telegram(BOT_TOKEN, chat_id, msg)
 
     elif text.startswith("/status"):
         send_telegram(BOT_TOKEN, chat_id, "⏳ Fetching latest market data...")
         try:
-            qqq, tqqq, vix      = fetch_data()
-            sig                 = compute_signal(qqq, tqqq, vix)
+            spy, upro, gld, ugl = fetch_data()
+            sig                 = compute_signal(spy, upro, gld, ugl)
             portfolio_value     = users.get(str(chat_id), {}).get("portfolio_value")
             msg                 = format_message(sig, portfolio_value=portfolio_value, mode="status")
             send_telegram(BOT_TOKEN, chat_id, msg)
@@ -65,7 +62,7 @@ def handle_command(chat_id, text, first_name):
         parts = text.split()
         if len(parts) < 2:
             send_telegram(BOT_TOKEN, chat_id,
-                "Usage: `/setportfolio 10000`\nEnter your starting portfolio value in USD.")
+                "Usage: `/setportfolio 10000`\nEnter your total portfolio value in USD.")
         else:
             try:
                 amount = float(parts[1].replace(",", "").replace("$", ""))
@@ -73,7 +70,9 @@ def handle_command(chat_id, text, first_name):
                 save_users(users)
                 send_telegram(BOT_TOKEN, chat_id,
                     f"✅ Portfolio set to `${amount:,.0f}`\n"
-                    f"This will be used in your weekly signals and /status readouts.")
+                    f"  UPRO 75%: `${amount * 0.75:,.0f}`\n"
+                    f"  UGL  25%: `${amount * 0.25:,.0f}`\n"
+                    f"Shown in your weekly signals and /status readouts.")
             except ValueError:
                 send_telegram(BOT_TOKEN, chat_id,
                     "❌ Invalid amount. Usage: `/setportfolio 10000`")
@@ -81,18 +80,22 @@ def handle_command(chat_id, text, first_name):
     elif text.startswith("/help"):
         msg = (
             "*TripleEdge Commands*\n\n"
-            "  /start — register and get started\n"
-            "  /status — get the current signal right now\n"
-            "  /setportfolio <amount> — set your starting capital\n"
+            "  /status — current signal for both engines\n"
+            "  /setportfolio <amount> — set your portfolio value\n"
             "  /help — show this message\n\n"
-            "*How it works:*\n"
-            "Every Monday I check:\n"
-            "  • Is QQQ above its 200-week SMA? (regime)\n"
-            "  • Is TQQQ above its 20-week SMA? (re-entry)\n"
-            "  • Has TQQQ dropped 12% from its peak? (stop)\n\n"
-            "Signal can be: 🟢 HOLD · 🔵 BUY · 🚨 SELL · ⚪️ CASH · 🟡 WAIT\n\n"
+            "*Strategy (75% UPRO / 25% UGL):*\n\n"
+            "*UPRO Engine*\n"
+            "  • SPY above 65-week SMA? (regime)\n"
+            "  • UPRO above 10-week SMA? (re-entry)\n"
+            "  • UPRO within 22% of peak? (trailing stop)\n\n"
+            "*UGL Engine*\n"
+            "  • GLD above 100-week SMA? (regime)\n"
+            "  • GLD above 20-week SMA? (re-entry)\n"
+            "  • UGL within 28% of peak? (trailing stop)\n\n"
+            "Signal: 🟢 HOLD · 🟡 WAIT · ⚪️ CASH · 🚨 SELL\n"
+            "Cash goes to SGOV while sidelined (~5.2% yield)\n\n"
             "━━━━━━━━━━━━━━━━\n"
-            "_TripleEdge — TQQQ Trend System_"
+            "_TripleEdge · UPRO + UGL · Not financial advice_"
         )
         send_telegram(BOT_TOKEN, chat_id, msg)
 
@@ -102,15 +105,14 @@ def handle_command(chat_id, text, first_name):
 
 
 def run_bot():
-    """Poll for updates and handle commands."""
-    print("TripleEdge bot is running...")
+    print("TripleEdge bot is running (local polling mode)...")
     offset = None
     while True:
         try:
             updates = get_updates(offset)
             for update in updates:
-                offset = update["update_id"] + 1
-                msg    = update.get("message", {})
+                offset     = update["update_id"] + 1
+                msg        = update.get("message", {})
                 if not msg:
                     continue
                 chat_id    = msg["chat"]["id"]

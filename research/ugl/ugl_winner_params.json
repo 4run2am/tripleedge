@@ -1,0 +1,7 @@
+{
+  "regime_period": 100,
+  "reentry_instrument": "GLD",
+  "reentry_period": 20,
+  "trailing_stop_pct": 0.28,
+  "regime_type": "weekly_sma"
+}
