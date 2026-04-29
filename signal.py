@@ -1,16 +1,22 @@
 """
-TripleEdge — TQQQ Trend + Risk-Control Signal Bot
-===================================================
-Fetches weekly data, computes signal, and sends Telegram notification.
-Can run in two modes:
-  1. Weekly auto-signal (called by GitHub Actions every Monday)
-  2. On-demand /status command (called by the bot handler)
-Core strategy:
-  - Regime filter:  QQQ weekly close > QQQ SMA200
-  - Re-entry filter: TQQQ weekly close > TQQQ SMA20
-  - Trailing stop:  12% from peak TQQQ price
-  - Signal cadence: Every Monday 8AM ET via GitHub Actions
-  - Data source:    Tiingo API (reliable in cloud environments)
+TripleEdge — Dual-Engine Signal Bot (UPRO + UGL)
+=================================================
+Active strategy: 75% UPRO / 25% UGL.
+
+UPRO Engine:
+  - Regime:   SPY weekly close > SPY 65-week SMA
+  - Re-entry: UPRO weekly close > UPRO 10-week SMA
+  - Stop:     22% trailing stop from UPRO 52-week high
+
+UGL Engine:
+  - Regime:   GLD weekly close > GLD 100-week SMA
+  - Re-entry: GLD weekly close > GLD 20-week SMA  (GLD, not UGL)
+  - Stop:     28% trailing stop from UGL 52-week high
+
+Portfolio:  75% UPRO / 25% UGL
+Cash proxy: SGOV / T-bills while sidelined
+Cadence:    Weekly — Friday close, Monday open execution
+Data:       Tiingo API
 """
 
 import os
@@ -19,17 +25,27 @@ import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 
-# ── CONFIG ────────────────────────────────────────────────────────────────────
-SMA_REGIME        = 200    # QQQ weekly SMA for regime filter
-SMA_REENTRY       = 20     # TQQQ weekly SMA for re-entry confirmation
-TRAILING_STOP_PCT = 0.12   # 12% trailing stop from peak
-USERS_FILE        = "users.json"
-TIINGO_BASE_URL   = "https://api.tiingo.com/tiingo/daily"
+# ── ENGINE PARAMETERS ─────────────────────────────────────────────────────────
+# UPRO Engine  (SPY regime → UPRO re-entry → UPRO trailing stop)
+UPRO_SMA_REGIME        = 65
+UPRO_SMA_REENTRY       = 10
+UPRO_TRAILING_STOP_PCT = 0.22
+
+# UGL Engine   (GLD regime → GLD re-entry → UGL trailing stop)
+UGL_SMA_REGIME         = 100
+UGL_SMA_REENTRY        = 20
+UGL_TRAILING_STOP_PCT  = 0.28
+
+# Portfolio weights
+UPRO_WEIGHT = 0.75
+UGL_WEIGHT  = 0.25
+
+USERS_FILE      = "users.json"
+TIINGO_BASE_URL = "https://api.tiingo.com/tiingo/daily"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 def load_users():
-    """Load user data from users.json."""
     if not os.path.exists(USERS_FILE):
         return {}
     with open(USERS_FILE, "r") as f:
@@ -37,189 +53,232 @@ def load_users():
 
 
 def save_users(users):
-    """Save user data to users.json."""
     with open(USERS_FILE, "w") as f:
         json.dump(users, f, indent=2)
 
 
 def fetch_tiingo(ticker, api_key, start_date):
-    """
-    Fetch daily price data from Tiingo for a given ticker.
-    Returns a pandas Series of adjusted close prices indexed by date.
-    """
-    url = f"{TIINGO_BASE_URL}/{ticker}/prices"
+    """Fetch weekly adjusted close prices from Tiingo."""
+    url     = f"{TIINGO_BASE_URL}/{ticker}/prices"
     headers = {"Content-Type": "application/json"}
-    params = {
-        "startDate":   start_date,
-        "token":       api_key,
-        "resampleFreq": "weekly",
-    }
-    resp = requests.get(url, headers=headers, params=params, timeout=15)
+    params  = {"startDate": start_date, "token": api_key, "resampleFreq": "weekly"}
+    resp    = requests.get(url, headers=headers, params=params, timeout=15)
     resp.raise_for_status()
-    data = resp.json()
-
+    data    = resp.json()
     if not data:
         raise ValueError(f"No data returned for {ticker}")
-
     df = pd.DataFrame(data)
     df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
     df = df.set_index("date").sort_index()
-
-    # Use adjClose if available, fall back to close
-    price_col = "adjClose" if "adjClose" in df.columns else "close"
-    return df[price_col].dropna()
+    col = "adjClose" if "adjClose" in df.columns else "close"
+    return df[col].dropna()
 
 
-def fetch_data(api_key):
-    """Fetch QQQ and TQQQ weekly price data from Tiingo."""
-    # Need enough history for SMA200 (200 weeks ≈ 4 years, use 5 for safety)
-    start_date = (datetime.now() - timedelta(weeks=220)).strftime("%Y-%m-%d")
+def fetch_data(api_key=None):
+    """Fetch SPY, UPRO, GLD, UGL weekly price data from Tiingo.
 
-    print("  Fetching QQQ...")
-    qqq  = fetch_tiingo("QQQ",  api_key, start_date)
-    print("  Fetching TQQQ...")
-    tqqq = fetch_tiingo("TQQQ", api_key, start_date)
+    Returns (spy, upro, gld, ugl) as aligned pandas Series.
+    """
+    if api_key is None:
+        api_key = os.environ.get("TIINGO_API_KEY")
+    # 220 weeks covers the 100-week UGL regime SMA plus warm-up buffer
+    start = (datetime.now() - timedelta(weeks=220)).strftime("%Y-%m-%d")
 
-    # Align on common dates
-    common = qqq.index.intersection(tqqq.index)
-    return qqq.loc[common], tqqq.loc[common]
+    print("  Fetching SPY...")
+    spy  = fetch_tiingo("SPY",  api_key, start)
+    print("  Fetching UPRO...")
+    upro = fetch_tiingo("UPRO", api_key, start)
+    print("  Fetching GLD...")
+    gld  = fetch_tiingo("GLD",  api_key, start)
+    print("  Fetching UGL...")
+    ugl  = fetch_tiingo("UGL",  api_key, start)
+
+    common_upro = spy.index.intersection(upro.index)
+    spy, upro   = spy.loc[common_upro], upro.loc[common_upro]
+
+    common_ugl = gld.index.intersection(ugl.index)
+    gld, ugl   = gld.loc[common_ugl], ugl.loc[common_ugl]
+
+    return spy, upro, gld, ugl
 
 
-def compute_signal(qqq, tqqq):
-    """Compute current signal and all key levels."""
-    qqq_sma200 = qqq.rolling(SMA_REGIME).mean()
-    tqqq_sma20 = tqqq.rolling(SMA_REENTRY).mean()
+def _compute_engine_signal(
+    regime_series, reentry_series, stop_series,
+    sma_regime, sma_reentry, trailing_stop_pct,
+    regime_ticker, reentry_ticker, stop_ticker,
+):
+    """Compute signal for one engine.
 
-    latest_qqq      = float(qqq.iloc[-1])
-    latest_tqqq     = float(tqqq.iloc[-1])
-    latest_qqq_sma  = float(qqq_sma200.iloc[-1])
-    latest_tqqq_sma = float(tqqq_sma20.iloc[-1])
+    regime_series  — unleveraged index for regime filter (e.g. SPY or GLD)
+    reentry_series — series for re-entry confirmation (may equal regime_series)
+    stop_series    — leveraged ETF for trailing stop tracking (e.g. UPRO or UGL)
+    """
+    # Regime filter
+    reg_sma        = regime_series.rolling(sma_regime).mean()
+    latest_reg     = float(regime_series.iloc[-1])
+    latest_reg_sma = float(reg_sma.iloc[-1])
+    regime_on      = latest_reg > latest_reg_sma
+    reg_chg        = float((regime_series.iloc[-1] / regime_series.iloc[-2] - 1) * 100) if len(regime_series) > 1 else 0.0
 
-    # Weekly change
-    tqqq_weekly_chg = float((tqqq.iloc[-1] / tqqq.iloc[-2] - 1) * 100) if len(tqqq) > 1 else 0.0
-    qqq_weekly_chg  = float((qqq.iloc[-1]  / qqq.iloc[-2]  - 1) * 100) if len(qqq)  > 1 else 0.0
+    # Re-entry signal
+    re_sma         = reentry_series.rolling(sma_reentry).mean()
+    latest_re      = float(reentry_series.iloc[-1])
+    latest_re_sma  = float(re_sma.iloc[-1])
+    reentry_ok     = latest_re > latest_re_sma
+    re_chg         = float((reentry_series.iloc[-1] / reentry_series.iloc[-2] - 1) * 100) if len(reentry_series) > 1 else 0.0
 
-    regime_on  = latest_qqq  > latest_qqq_sma
-    reentry_ok = latest_tqqq > latest_tqqq_sma
+    # Trailing stop (on leveraged ETF)
+    stop_52w       = float(stop_series.iloc[-52:].max()) if len(stop_series) >= 52 else float(stop_series.max())
+    stop_level     = round(stop_52w * (1 - trailing_stop_pct), 2)
+    latest_stop    = float(stop_series.iloc[-1])
+    stop_distance  = round((latest_stop - stop_level) / latest_stop * 100, 1)
+    stop_hit       = latest_stop <= stop_level
 
-    # Trailing stop — use rolling 52-week high as proxy for peak
-    tqqq_52w_high = float(tqqq.iloc[-52:].max()) if len(tqqq) >= 52 else float(tqqq.max())
-    stop_level    = round(tqqq_52w_high * (1 - TRAILING_STOP_PCT), 2)
-    stop_distance = round((latest_tqqq - stop_level) / latest_tqqq * 100, 1)
-
-    # Trailing stop hit
-    stop_hit = latest_tqqq <= stop_level
-
-    # Determine signal
     if stop_hit:
-        action = "SELL"
-        reason = "Trailing stop hit — exit to SGOV/BIL"
+        action, reason = "SELL", "Trailing stop hit — exit to SGOV/BIL"
     elif not regime_on:
-        action = "CASH"
-        reason = "Regime OFF — stay in SGOV/BIL"
-    elif regime_on and not reentry_ok:
-        action = "WAIT"
-        reason = "Regime ON but re-entry not confirmed yet"
-    elif regime_on and reentry_ok:
-        action = "HOLD"
-        reason = "In position — conditions intact"
+        action, reason = "CASH", "Regime OFF — stay in SGOV/BIL"
+    elif not reentry_ok:
+        action, reason = "WAIT", "Regime ON but re-entry not confirmed yet"
     else:
-        action = "CASH"
-        reason = "Conditions not met"
+        action, reason = "HOLD", "In position — conditions intact"
 
     return {
-        "action":          action,
-        "reason":          reason,
-        "regime_on":       regime_on,
-        "reentry_ok":      reentry_ok,
-        "stop_hit":        stop_hit,
-        "qqq_price":       round(latest_qqq, 2),
-        "qqq_sma200":      round(latest_qqq_sma, 2),
-        "tqqq_price":      round(latest_tqqq, 2),
-        "tqqq_sma20":      round(latest_tqqq_sma, 2),
-        "tqqq_52w_high":   round(tqqq_52w_high, 2),
-        "stop_level":      stop_level,
-        "stop_distance":   stop_distance,
-        "tqqq_weekly_chg": round(tqqq_weekly_chg, 2),
-        "qqq_weekly_chg":  round(qqq_weekly_chg, 2),
-        "date":            datetime.now(timezone.utc).strftime("%a %b %d, %Y"),
+        "action":              action,
+        "reason":              reason,
+        "regime_on":           regime_on,
+        "reentry_ok":          reentry_ok,
+        "stop_hit":            stop_hit,
+        "regime_ticker":       regime_ticker,
+        "regime_price":        round(latest_reg, 2),
+        "regime_sma":          round(latest_reg_sma, 2),
+        "sma_regime":          sma_regime,
+        "regime_chg":          round(reg_chg, 2),
+        "reentry_ticker":      reentry_ticker,
+        "reentry_price":       round(latest_re, 2),
+        "reentry_sma":         round(latest_re_sma, 2),
+        "sma_reentry":         sma_reentry,
+        "reentry_chg":         round(re_chg, 2),
+        "stop_ticker":         stop_ticker,
+        "stop_price":          round(latest_stop, 2),
+        "stop_52w_high":       round(stop_52w, 2),
+        "stop_level":          stop_level,
+        "stop_distance":       stop_distance,
+        "trailing_stop_pct":   trailing_stop_pct,
+        "same_regime_reentry": (regime_ticker == reentry_ticker),
     }
 
 
-def build_stop_bar(distance):
-    """Visual bar showing proximity to trailing stop."""
-    total  = 10
-    safe   = 20.0  # 20% distance = full green bar
-    filled = max(0, min(total, int((distance / safe) * total)))
-    empty  = total - filled
-    color  = "🟩" if distance > 8 else ("🟨" if distance > 4 else "🟥")
-    return color * filled + "⬜" * empty
+def compute_signal(spy, upro, gld, ugl):
+    """Compute signals for both engines. Returns dict with 'upro', 'ugl', 'date'."""
+    upro_sig = _compute_engine_signal(
+        spy, upro, upro,
+        UPRO_SMA_REGIME, UPRO_SMA_REENTRY, UPRO_TRAILING_STOP_PCT,
+        "SPY", "UPRO", "UPRO",
+    )
+    ugl_sig = _compute_engine_signal(
+        gld, gld, ugl,
+        UGL_SMA_REGIME, UGL_SMA_REENTRY, UGL_TRAILING_STOP_PCT,
+        "GLD", "GLD", "UGL",
+    )
+    return {
+        "upro": upro_sig,
+        "ugl":  ugl_sig,
+        "date": datetime.now(timezone.utc).strftime("%a %b %d, %Y"),
+    }
 
 
-def format_message(sig, portfolio_value=None, mode="weekly"):
-    """Format the Telegram notification message."""
+def _stop_bar(distance, max_distance):
+    """Ten-cell visual bar showing distance to trailing stop."""
+    filled = max(0, min(10, int((distance / max_distance) * 10)))
+    color  = "🟩" if distance > max_distance * 0.4 else ("🟨" if distance > max_distance * 0.2 else "🟥")
+    return color * filled + "⬜" * (10 - filled)
+
+
+def _format_engine_block(sig, label):
+    """Format one engine's signal block for Telegram Markdown."""
     action_map = {
-        "HOLD": ("🟢", "HOLD — Stay in TQQQ"),
+        "HOLD": ("🟢", "HOLD — Stay in position"),
         "SELL": ("🚨", "SELL — Exit to SGOV/BIL now"),
         "WAIT": ("🟡", "WAIT — Regime ON, re-entry not confirmed"),
         "CASH": ("⚪️", "CASH — Stay in SGOV/BIL"),
-        "BUY":  ("🔵", "BUY — Enter TQQQ"),
+        "BUY":  ("🔵", "BUY — Enter position"),
     }
     emoji, action_label = action_map.get(sig["action"], ("❓", sig["action"]))
-    header = "📊 *TripleEdge Weekly Signal*" if mode == "weekly" else "📊 *TripleEdge Status*"
-
     regime_icon  = "✅" if sig["regime_on"]  else "❌"
     reentry_icon = "✅" if sig["reentry_ok"] else "❌"
 
-    tqqq_arrow = "📈" if sig["tqqq_weekly_chg"] >= 0 else "📉"
-    qqq_arrow  = "📈" if sig["qqq_weekly_chg"]  >= 0 else "📉"
-    tqqq_chg   = f"+{sig['tqqq_weekly_chg']}%" if sig["tqqq_weekly_chg"] >= 0 else f"{sig['tqqq_weekly_chg']}%"
-    qqq_chg    = f"+{sig['qqq_weekly_chg']}%"  if sig["qqq_weekly_chg"]  >= 0 else f"{sig['qqq_weekly_chg']}%"
+    def chg_str(v): return f"+{v}%" if v >= 0 else f"{v}%"
+    def arrow(v):   return "📈" if v >= 0 else "📉"
 
-    stop_bar = build_stop_bar(sig["stop_distance"])
+    stop_bar = _stop_bar(sig["stop_distance"], sig["trailing_stop_pct"] * 100)
+    stop_pct = f"{sig['trailing_stop_pct']:.0%}"
 
-    msg = (
-        f"{header}\n"
-        f"_{sig['date']}_\n\n"
-        f"{emoji} *{action_label}*\n"
-        f"_{sig['reason']}_\n\n"
-        f"━━━━━━━━━━━━━━━━\n"
-        f"*QQQ*\n"
-        f"  Price:   `${sig['qqq_price']}`  {qqq_arrow} {qqq_chg} this week\n"
-        f"  SMA200:  `${sig['qqq_sma200']}`  {regime_icon} Regime {'ON' if sig['regime_on'] else 'OFF'}\n\n"
-        f"*TQQQ*\n"
-        f"  Price:   `${sig['tqqq_price']}`  {tqqq_arrow} {tqqq_chg} this week\n"
-        f"  SMA20:   `${sig['tqqq_sma20']}`  {reentry_icon} Re-entry {'OK' if sig['reentry_ok'] else 'NOT OK'}\n\n"
-        f"*Risk*\n"
-        f"  52w High:  `${sig['tqqq_52w_high']}`\n"
-        f"  Stop:      `${sig['stop_level']}` (12% trail)\n"
-        f"  Distance:  `{sig['stop_distance']}%` to stop\n"
-        f"  {stop_bar}\n"
-    )
+    if sig["same_regime_reentry"]:
+        # UGL engine: GLD fills both regime and re-entry roles → one compact block
+        block = (
+            f"{emoji} *{label}: {action_label}*\n"
+            f"_{sig['reason']}_\n\n"
+            f"*{sig['regime_ticker']}*\n"
+            f"  Price:   `${sig['regime_price']}`  {arrow(sig['regime_chg'])} {chg_str(sig['regime_chg'])}\n"
+            f"  SMA{sig['sma_regime']}:  `${sig['regime_sma']}`  {regime_icon} Regime {'ON' if sig['regime_on'] else 'OFF'}\n"
+            f"  SMA{sig['sma_reentry']}:   `${sig['reentry_sma']}`  {reentry_icon} Re-entry {'OK' if sig['reentry_ok'] else 'NOT OK'}\n\n"
+            f"*Risk ({sig['stop_ticker']})*\n"
+            f"  52w High:  `${sig['stop_52w_high']}`\n"
+            f"  Stop:      `${sig['stop_level']}` ({stop_pct} trail)\n"
+            f"  Distance:  `{sig['stop_distance']}%` to stop\n"
+            f"  {stop_bar}\n"
+        )
+    else:
+        # UPRO engine: separate regime ticker (SPY) and position ticker (UPRO)
+        block = (
+            f"{emoji} *{label}: {action_label}*\n"
+            f"_{sig['reason']}_\n\n"
+            f"*{sig['regime_ticker']}* (Regime)\n"
+            f"  Price:   `${sig['regime_price']}`  {arrow(sig['regime_chg'])} {chg_str(sig['regime_chg'])}\n"
+            f"  SMA{sig['sma_regime']}:  `${sig['regime_sma']}`  {regime_icon} Regime {'ON' if sig['regime_on'] else 'OFF'}\n\n"
+            f"*{sig['reentry_ticker']}* (Position)\n"
+            f"  Price:   `${sig['reentry_price']}`  {arrow(sig['reentry_chg'])} {chg_str(sig['reentry_chg'])}\n"
+            f"  SMA{sig['sma_reentry']}:   `${sig['reentry_sma']}`  {reentry_icon} Re-entry {'OK' if sig['reentry_ok'] else 'NOT OK'}\n\n"
+            f"*Risk*\n"
+            f"  52w High:  `${sig['stop_52w_high']}`\n"
+            f"  Stop:      `${sig['stop_level']}` ({stop_pct} trail)\n"
+            f"  Distance:  `{sig['stop_distance']}%` to stop\n"
+            f"  {stop_bar}\n"
+        )
+    return block
+
+
+def format_message(sig, portfolio_value=None, mode="weekly"):
+    """Build the full dual-engine Telegram message."""
+    header = "📊 *TripleEdge Weekly Signal*" if mode == "weekly" else "📊 *TripleEdge Status*"
+
+    msg  = f"{header}\n_{sig['date']}_\n\n"
+    msg += "━━━━━━━━━━━━━━━━\n"
+    msg += _format_engine_block(sig["upro"], "UPRO (75%)")
+    msg += "\n━━━━━━━━━━━━━━━━\n"
+    msg += _format_engine_block(sig["ugl"],  "UGL (25%)")
 
     if portfolio_value:
         try:
             pv = float(portfolio_value)
             msg += (
-                f"\n*Portfolio*\n"
-                f"  Starting:  `${pv:,.0f}`\n"
-                f"  Stop loss: `${pv * (1 - TRAILING_STOP_PCT):,.0f}` worst case\n"
+                f"\n━━━━━━━━━━━━━━━━\n"
+                f"*Your Portfolio* (`${pv:,.0f}`)\n"
+                f"  UPRO 75%:  `${pv * UPRO_WEIGHT:,.0f}`\n"
+                f"  UGL  25%:  `${pv * UGL_WEIGHT:,.0f}`\n"
+                f"  Cash out:  park in SGOV for inactive engine(s)\n"
             )
         except Exception:
             pass
 
-    msg += f"\n━━━━━━━━━━━━━━━━\n_TripleEdge — TQQQ Trend System_"
+    msg += f"\n━━━━━━━━━━━━━━━━\n_TripleEdge · UPRO + UGL · Not financial advice_"
     return msg
 
 
 def send_telegram(bot_token, chat_id, message):
-    """Send a Telegram message."""
     url  = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-    data = {
-        "chat_id":    chat_id,
-        "text":       message,
-        "parse_mode": "Markdown",
-    }
+    data = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
     resp = requests.post(url, data=data, timeout=10)
     return resp.ok
 
@@ -237,17 +296,23 @@ def run_weekly_signal():
         return
 
     print("Fetching market data...")
-    qqq, tqqq = fetch_data(tiingo_key)
-    print(f"  QQQ bars: {len(qqq)} | TQQQ bars: {len(tqqq)}")
+    spy, upro, gld, ugl = fetch_data(tiingo_key)
+    print(f"  SPY: {len(spy)} bars | UPRO: {len(upro)} bars")
+    print(f"  GLD: {len(gld)} bars | UGL:  {len(ugl)} bars")
 
-    sig = compute_signal(qqq, tqqq)
-    print(f"  Signal: {sig['action']} — {sig['reason']}")
-    print(f"  QQQ: ${sig['qqq_price']} | SMA200: ${sig['qqq_sma200']} | Regime: {'ON' if sig['regime_on'] else 'OFF'}")
-    print(f"  TQQQ: ${sig['tqqq_price']} | SMA20: ${sig['tqqq_sma20']} | Stop: ${sig['stop_level']} ({sig['stop_distance']}% away)")
+    sig = compute_signal(spy, upro, gld, ugl)
+    u, g = sig["upro"], sig["ugl"]
+
+    print(f"  UPRO ({u['action']}): SPY ${u['regime_price']} vs SMA{u['sma_regime']} ${u['regime_sma']} | "
+          f"UPRO ${u['reentry_price']} vs SMA{u['sma_reentry']} ${u['reentry_sma']} | "
+          f"Stop ${u['stop_level']} ({u['stop_distance']}% away)")
+    print(f"  UGL  ({g['action']}): GLD ${g['regime_price']} vs SMA{g['sma_regime']} ${g['regime_sma']} (regime), "
+          f"SMA{g['sma_reentry']} ${g['reentry_sma']} (re-entry) | "
+          f"UGL ${g['stop_price']} stop ${g['stop_level']} ({g['stop_distance']}% away)")
 
     users = load_users()
     if not users:
-        print("No users registered yet — message the bot /start to register.")
+        print("No users registered. Message the bot /start to register.")
         return
 
     for chat_id, user_data in users.items():
