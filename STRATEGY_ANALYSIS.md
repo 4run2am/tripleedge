@@ -304,6 +304,57 @@ The mechanical signal removes 90% of behavioral failure modes. The remaining 10%
 
 ---
 
+## Trailing Stop Implementation Fix
+
+An earlier version of the live bot computed the trailing stop using a **52-week rolling maximum** of the price series:
+
+```python
+# OLD — wrong
+stop_52w   = stop_series.iloc[-52:].max()
+stop_level = stop_52w * (1 - trailing_stop_pct)
+```
+
+This diverged from the research backtest, which tracks a **peak from entry** that ratchets up only while in position:
+
+```python
+# Research backtest (correct)
+if in_position:
+    peak_price = max(peak_price, current_price)
+    stop_level = peak_price * (1 - trailing_stop_pct)
+```
+
+**Why the 52-week max was wrong:**
+1. It ignored entry timing — would fire SELL against peaks that occurred before you entered the position
+2. It rolled off after 52 weeks — long-held positions saw old peaks vanish, weakening the stop
+3. It computed phantom stops when the strategy was actually in cash
+
+**The fix:** The bot now persists per-engine state in `engine_state.json`:
+
+```json
+{
+  "upro": {
+    "in_position": true,
+    "peak_price": 89.41,
+    "entry_price": 73.42,
+    "entry_date": "2026-05-11"
+  },
+  "ugl": { "in_position": false, ... }
+}
+```
+
+State transitions match the research backtest exactly:
+- **Out of position + regime ON + re-entry confirmed** → BUY (set peak = current price)
+- **In position + new high** → peak ratchets up
+- **In position + price ≤ peak × (1 − stop%)** → SELL (stop hit)
+- **In position + regime broken** → SELL (regime exit)
+- **Out of position** → CASH or WAIT depending on regime
+
+The `/status` command reads state but does NOT mutate it. Only the weekly Monday signal run writes transitions.
+
+**Impact on backtest validity:** The backtest CAGR/Sharpe/Drawdown figures were always computed with the correct (entry-relative peak) logic — those numbers are untouched. What changed is that the **live bot now actually executes that logic** instead of an approximation that could fire different signals than the research validated.
+
+---
+
 ## Bottom Line
 
 TripleEdge is **not** a magic strategy. It's a disciplined application of three well-documented edges:

@@ -6,32 +6,60 @@ Active strategy: 75% UPRO / 25% UGL.
 UPRO Engine:
   - Regime:   SPY weekly close > SPY 65-week SMA
   - Re-entry: UPRO weekly close > UPRO 10-week SMA
-  - Stop:     22% trailing stop from UPRO 52-week high
+  - Stop:     22% trailing stop from UPRO peak SINCE ENTRY
 
 UGL Engine:
   - Regime:   GLD weekly close > GLD 100-week SMA
   - Re-entry: GLD weekly close > GLD 20-week SMA  (GLD, not UGL)
-  - Stop:     28% trailing stop from UGL 52-week high
+  - Stop:     28% trailing stop from UGL peak SINCE ENTRY
 
 Portfolio:  75% UPRO / 25% UGL
 Cash proxy: SGOV / T-bills while sidelined
 Cadence:    Weekly — Friday close, Monday open execution
 Data:       Tiingo API
+
+State tracking
+--------------
+This module is stateful. Per-engine state is persisted to engine_state.json:
+  - in_position:  bool — currently long the leveraged ETF?
+  - peak_price:   float — highest price since entry (ratchets while in_position)
+  - entry_price:  float — price at which the position was opened
+  - entry_date:   ISO date string
+
+State mutates only on the weekly signal run (run_weekly_signal). The /status
+command computes a signal against the current persisted state but does NOT
+write back. This matches the research backtest logic exactly:
+
+    if in_position:
+        peak_price = max(peak_price, current_price)
+        stop_level = peak_price * (1 - trailing_stop_pct)
+        if current_price <= stop_level or not regime_on:
+            EXIT (in_position = False, clear peak)
+        else:
+            HOLD
+    else:
+        if regime_on and reentry_ok:
+            ENTER (in_position = True, peak = current_price)
+        elif regime_on:
+            WAIT
+        else:
+            CASH
 """
 
 import os
 import json
+import copy
 import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 
 # ── ENGINE PARAMETERS ─────────────────────────────────────────────────────────
-# UPRO Engine  (SPY regime → UPRO re-entry → UPRO trailing stop)
+# UPRO Engine  (SPY regime → UPRO re-entry → UPRO trailing stop from entry peak)
 UPRO_SMA_REGIME        = 65
 UPRO_SMA_REENTRY       = 10
 UPRO_TRAILING_STOP_PCT = 0.22
 
-# UGL Engine   (GLD regime → GLD re-entry → UGL trailing stop)
+# UGL Engine   (GLD regime → GLD re-entry → UGL trailing stop from entry peak)
 UGL_SMA_REGIME         = 100
 UGL_SMA_REENTRY        = 20
 UGL_TRAILING_STOP_PCT  = 0.28
@@ -41,6 +69,7 @@ UPRO_WEIGHT = 0.75
 UGL_WEIGHT  = 0.25
 
 USERS_FILE      = "users.json"
+STATE_FILE      = "engine_state.json"
 TIINGO_BASE_URL = "https://api.tiingo.com/tiingo/daily"
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -55,6 +84,51 @@ def load_users():
 def save_users(users):
     with open(USERS_FILE, "w") as f:
         json.dump(users, f, indent=2)
+
+
+def default_engine_state():
+    """Fresh state for a single engine — not in position, no entry recorded."""
+    return {
+        "in_position": False,
+        "peak_price":  None,
+        "entry_price": None,
+        "entry_date":  None,
+        "last_action": None,
+        "last_updated": None,
+    }
+
+
+def default_state():
+    """Default state file contents — both engines start out-of-position."""
+    return {
+        "upro": default_engine_state(),
+        "ugl":  default_engine_state(),
+    }
+
+
+def load_state():
+    """Load persisted engine state. Returns default state if file missing."""
+    if not os.path.exists(STATE_FILE):
+        return default_state()
+    try:
+        with open(STATE_FILE, "r") as f:
+            state = json.load(f)
+        # Backfill any missing engine keys (forward-compat)
+        for engine in ("upro", "ugl"):
+            if engine not in state:
+                state[engine] = default_engine_state()
+            else:
+                # Ensure all expected keys exist
+                for k, v in default_engine_state().items():
+                    state[engine].setdefault(k, v)
+        return state
+    except (json.JSONDecodeError, OSError):
+        return default_state()
+
+
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
 
 
 def fetch_tiingo(ticker, api_key, start_date):
@@ -106,44 +180,90 @@ def _compute_engine_signal(
     regime_series, reentry_series, stop_series,
     sma_regime, sma_reentry, trailing_stop_pct,
     regime_ticker, reentry_ticker, stop_ticker,
+    engine_state,
 ):
-    """Compute signal for one engine.
+    """Compute signal for one engine using persistent state.
 
-    regime_series  — unleveraged index for regime filter (e.g. SPY or GLD)
-    reentry_series — series for re-entry confirmation (may equal regime_series)
-    stop_series    — leveraged ETF for trailing stop tracking (e.g. UPRO or UGL)
+    Matches the research backtest logic exactly:
+      - if in_position: peak ratchets up; exit on stop OR regime break
+      - if not in_position: enter on regime_on AND reentry_ok
+
+    Returns (signal_dict, new_engine_state).
+    The caller decides whether to persist new_engine_state.
     """
-    # Regime filter
+    # --- Compute regime ---
     reg_sma        = regime_series.rolling(sma_regime).mean()
     latest_reg     = float(regime_series.iloc[-1])
     latest_reg_sma = float(reg_sma.iloc[-1])
     regime_on      = latest_reg > latest_reg_sma
     reg_chg        = float((regime_series.iloc[-1] / regime_series.iloc[-2] - 1) * 100) if len(regime_series) > 1 else 0.0
 
-    # Re-entry signal
-    re_sma         = reentry_series.rolling(sma_reentry).mean()
-    latest_re      = float(reentry_series.iloc[-1])
-    latest_re_sma  = float(re_sma.iloc[-1])
-    reentry_ok     = latest_re > latest_re_sma
-    re_chg         = float((reentry_series.iloc[-1] / reentry_series.iloc[-2] - 1) * 100) if len(reentry_series) > 1 else 0.0
+    # --- Compute re-entry ---
+    re_sma        = reentry_series.rolling(sma_reentry).mean()
+    latest_re     = float(reentry_series.iloc[-1])
+    latest_re_sma = float(re_sma.iloc[-1])
+    reentry_ok    = latest_re > latest_re_sma
+    re_chg        = float((reentry_series.iloc[-1] / reentry_series.iloc[-2] - 1) * 100) if len(reentry_series) > 1 else 0.0
 
-    # Trailing stop (on leveraged ETF)
-    stop_52w       = float(stop_series.iloc[-52:].max()) if len(stop_series) >= 52 else float(stop_series.max())
-    stop_level     = round(stop_52w * (1 - trailing_stop_pct), 2)
-    latest_stop    = float(stop_series.iloc[-1])
-    stop_distance  = round((latest_stop - stop_level) / latest_stop * 100, 1)
-    stop_hit       = latest_stop <= stop_level
+    # --- Current price of the position instrument (used for trailing stop) ---
+    latest_stop = float(stop_series.iloc[-1])
 
-    if stop_hit:
-        action, reason = "SELL", "Trailing stop hit — exit to SGOV/BIL"
-    elif not regime_on:
-        action, reason = "CASH", "Regime OFF — stay in SGOV/BIL"
-    elif not reentry_ok:
-        action, reason = "WAIT", "Regime ON but re-entry not confirmed yet"
+    # --- Apply state machine ---
+    state = copy.deepcopy(engine_state)
+    today_iso = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    if state["in_position"]:
+        # Ratchet peak — only ever ascends
+        prior_peak = state["peak_price"] if state["peak_price"] is not None else latest_stop
+        new_peak   = max(prior_peak, latest_stop)
+        state["peak_price"] = new_peak
+
+        stop_level = new_peak * (1 - trailing_stop_pct)
+        stop_hit   = latest_stop <= stop_level
+
+        if stop_hit:
+            action, reason = "SELL", "Trailing stop hit — exit to SGOV/BIL"
+            new_state = default_engine_state()
+        elif not regime_on:
+            action, reason = "SELL", "Regime broke — exit to SGOV/BIL"
+            new_state = default_engine_state()
+        else:
+            action, reason = "HOLD", "In position — conditions intact"
+            new_state = state
     else:
-        action, reason = "HOLD", "In position — conditions intact"
+        # Out of position
+        if not regime_on:
+            action, reason = "CASH", "Regime OFF — stay in SGOV/BIL"
+            new_state = state
+        elif not reentry_ok:
+            action, reason = "WAIT", "Regime ON but re-entry not confirmed yet"
+            new_state = state
+        else:
+            action, reason = "BUY", "Regime ON + re-entry confirmed — enter position"
+            new_state = {
+                "in_position": True,
+                "peak_price":  latest_stop,
+                "entry_price": latest_stop,
+                "entry_date":  today_iso,
+                "last_action": None,
+                "last_updated": None,
+            }
+        # When out of position, peak/stop are meaningless for display
+        new_peak = None
+        stop_level = None
+        stop_hit = False
 
-    return {
+    new_state["last_action"]  = action
+    new_state["last_updated"] = today_iso
+
+    # --- Build display fields ---
+    in_pos_now = state["in_position"]   # state at evaluation time
+    if in_pos_now:
+        stop_distance = round((latest_stop - stop_level) / latest_stop * 100, 1) if latest_stop > 0 else 0.0
+    else:
+        stop_distance = None
+
+    sig = {
         "action":              action,
         "reason":              reason,
         "regime_on":           regime_on,
@@ -161,35 +281,66 @@ def _compute_engine_signal(
         "reentry_chg":         round(re_chg, 2),
         "stop_ticker":         stop_ticker,
         "stop_price":          round(latest_stop, 2),
-        "stop_52w_high":       round(stop_52w, 2),
-        "stop_level":          stop_level,
+        # Position-aware fields (None when not in position)
+        "in_position":         in_pos_now,
+        "peak_price":          round(new_peak, 2) if new_peak is not None else None,
+        "entry_price":         round(engine_state["entry_price"], 2) if engine_state.get("entry_price") else None,
+        "entry_date":          engine_state.get("entry_date"),
+        "stop_level":          round(stop_level, 2) if stop_level is not None else None,
         "stop_distance":       stop_distance,
         "trailing_stop_pct":   trailing_stop_pct,
         "same_regime_reentry": (regime_ticker == reentry_ticker),
     }
 
+    return sig, new_state
 
-def compute_signal(spy, upro, gld, ugl):
-    """Compute signals for both engines. Returns dict with 'upro', 'ugl', 'date'."""
-    upro_sig = _compute_engine_signal(
+
+def compute_signal(spy, upro, gld, ugl, state=None):
+    """Compute signals for both engines.
+
+    state — optional dict from load_state(). If None, a fresh state is used.
+
+    Returns (signal_dict, new_state). Caller persists new_state on weekly run.
+    """
+    if state is None:
+        state = default_state()
+
+    upro_sig, upro_state = _compute_engine_signal(
         spy, upro, upro,
         UPRO_SMA_REGIME, UPRO_SMA_REENTRY, UPRO_TRAILING_STOP_PCT,
         "SPY", "UPRO", "UPRO",
+        state["upro"],
     )
-    ugl_sig = _compute_engine_signal(
+    ugl_sig, ugl_state = _compute_engine_signal(
         gld, gld, ugl,
         UGL_SMA_REGIME, UGL_SMA_REENTRY, UGL_TRAILING_STOP_PCT,
         "GLD", "GLD", "UGL",
+        state["ugl"],
     )
-    return {
+
+    sig = {
         "upro": upro_sig,
         "ugl":  ugl_sig,
         "date": datetime.now(timezone.utc).strftime("%a %b %d, %Y"),
     }
+    new_state = {"upro": upro_state, "ugl": ugl_state}
+    return sig, new_state
+
+
+def compute_signal_readonly(spy, upro, gld, ugl):
+    """Read state from disk, compute signal, do NOT mutate persisted state.
+
+    Used by /status command. Returns the signal dict only.
+    """
+    state = load_state()
+    sig, _ = compute_signal(spy, upro, gld, ugl, state)
+    return sig
 
 
 def _stop_bar(distance, max_distance):
     """Ten-cell visual bar showing distance to trailing stop."""
+    if distance is None or max_distance <= 0:
+        return "⬜" * 10
     filled = max(0, min(10, int((distance / max_distance) * 10)))
     color  = "🟩" if distance > max_distance * 0.4 else ("🟨" if distance > max_distance * 0.2 else "🟥")
     return color * filled + "⬜" * (10 - filled)
@@ -211,8 +362,26 @@ def _format_engine_block(sig, label):
     def chg_str(v): return f"+{v}%" if v >= 0 else f"{v}%"
     def arrow(v):   return "📈" if v >= 0 else "📉"
 
-    stop_bar = _stop_bar(sig["stop_distance"], sig["trailing_stop_pct"] * 100)
     stop_pct = f"{sig['trailing_stop_pct']:.0%}"
+
+    # Risk block depends on whether we're in position
+    if sig["in_position"]:
+        stop_bar = _stop_bar(sig["stop_distance"], sig["trailing_stop_pct"] * 100)
+        risk_block = (
+            f"*Risk ({sig['stop_ticker']})*\n"
+            f"  Entry:     `${sig['entry_price']}` ({sig['entry_date']})\n"
+            f"  Peak:      `${sig['peak_price']}` (since entry)\n"
+            f"  Current:   `${sig['stop_price']}`\n"
+            f"  Stop:      `${sig['stop_level']}` ({stop_pct} trail)\n"
+            f"  Distance:  `{sig['stop_distance']}%` to stop\n"
+            f"  {stop_bar}\n"
+        )
+    else:
+        risk_block = (
+            f"*Risk ({sig['stop_ticker']})*\n"
+            f"  Not in position — trailing stop activates on BUY signal\n"
+            f"  Configured trail: {stop_pct} from entry peak\n"
+        )
 
     if sig["same_regime_reentry"]:
         # UGL engine: GLD fills both regime and re-entry roles → one compact block
@@ -223,11 +392,7 @@ def _format_engine_block(sig, label):
             f"  Price:   `${sig['regime_price']}`  {arrow(sig['regime_chg'])} {chg_str(sig['regime_chg'])}\n"
             f"  SMA{sig['sma_regime']}:  `${sig['regime_sma']}`  {regime_icon} Regime {'ON' if sig['regime_on'] else 'OFF'}\n"
             f"  SMA{sig['sma_reentry']}:   `${sig['reentry_sma']}`  {reentry_icon} Re-entry {'OK' if sig['reentry_ok'] else 'NOT OK'}\n\n"
-            f"*Risk ({sig['stop_ticker']})*\n"
-            f"  52w High:  `${sig['stop_52w_high']}`\n"
-            f"  Stop:      `${sig['stop_level']}` ({stop_pct} trail)\n"
-            f"  Distance:  `{sig['stop_distance']}%` to stop\n"
-            f"  {stop_bar}\n"
+            f"{risk_block}"
         )
     else:
         # UPRO engine: separate regime ticker (SPY) and position ticker (UPRO)
@@ -240,11 +405,7 @@ def _format_engine_block(sig, label):
             f"*{sig['reentry_ticker']}* (Position)\n"
             f"  Price:   `${sig['reentry_price']}`  {arrow(sig['reentry_chg'])} {chg_str(sig['reentry_chg'])}\n"
             f"  SMA{sig['sma_reentry']}:   `${sig['reentry_sma']}`  {reentry_icon} Re-entry {'OK' if sig['reentry_ok'] else 'NOT OK'}\n\n"
-            f"*Risk*\n"
-            f"  52w High:  `${sig['stop_52w_high']}`\n"
-            f"  Stop:      `${sig['stop_level']}` ({stop_pct} trail)\n"
-            f"  Distance:  `{sig['stop_distance']}%` to stop\n"
-            f"  {stop_bar}\n"
+            f"{risk_block}"
         )
     return block
 
@@ -284,7 +445,8 @@ def send_telegram(bot_token, chat_id, message):
 
 
 def run_weekly_signal():
-    """Called by GitHub Actions every Monday — sends signal to all registered users."""
+    """Called by GitHub Actions every Monday — computes signal, mutates state,
+    sends to all registered users."""
     bot_token  = os.environ.get("TELEGRAM_BOT_TOKEN")
     tiingo_key = os.environ.get("TIINGO_API_KEY")
 
@@ -300,15 +462,25 @@ def run_weekly_signal():
     print(f"  SPY: {len(spy)} bars | UPRO: {len(upro)} bars")
     print(f"  GLD: {len(gld)} bars | UGL:  {len(ugl)} bars")
 
-    sig = compute_signal(spy, upro, gld, ugl)
+    state = load_state()
+    print(f"Loaded state: UPRO in_position={state['upro']['in_position']} "
+          f"peak=${state['upro']['peak_price']} | "
+          f"UGL in_position={state['ugl']['in_position']} "
+          f"peak=${state['ugl']['peak_price']}")
+
+    sig, new_state = compute_signal(spy, upro, gld, ugl, state)
     u, g = sig["upro"], sig["ugl"]
 
-    print(f"  UPRO ({u['action']}): SPY ${u['regime_price']} vs SMA{u['sma_regime']} ${u['regime_sma']} | "
-          f"UPRO ${u['reentry_price']} vs SMA{u['sma_reentry']} ${u['reentry_sma']} | "
-          f"Stop ${u['stop_level']} ({u['stop_distance']}% away)")
-    print(f"  UGL  ({g['action']}): GLD ${g['regime_price']} vs SMA{g['sma_regime']} ${g['regime_sma']} (regime), "
-          f"SMA{g['sma_reentry']} ${g['reentry_sma']} (re-entry) | "
-          f"UGL ${g['stop_price']} stop ${g['stop_level']} ({g['stop_distance']}% away)")
+    print(f"  UPRO ({u['action']}): regime_on={u['regime_on']} reentry_ok={u['reentry_ok']} "
+          f"in_pos={u['in_position']} peak=${u['peak_price']} stop=${u['stop_level']}")
+    print(f"  UGL  ({g['action']}): regime_on={g['regime_on']} reentry_ok={g['reentry_ok']} "
+          f"in_pos={g['in_position']} peak=${g['peak_price']} stop=${g['stop_level']}")
+
+    # Persist new state BEFORE sending messages so a partial send failure
+    # doesn't lose the transition.
+    save_state(new_state)
+    print(f"State saved: UPRO in_position={new_state['upro']['in_position']} | "
+          f"UGL in_position={new_state['ugl']['in_position']}")
 
     users = load_users()
     if not users:

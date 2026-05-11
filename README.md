@@ -17,7 +17,7 @@ ProShares UltraPro S&P 500 — 3x leveraged S&P 500
 |---|---|
 | Regime filter | SPY weekly close > SPY **65-week SMA** |
 | Re-entry signal | UPRO weekly close > UPRO **10-week SMA** |
-| Trailing stop | UPRO drops **22%** from highest close since entry |
+| Trailing stop | UPRO drops **22%** from peak price since entry (ratchets up only) |
 | Cash proxy | SGOV / T-bills when out |
 
 ### UGL Engine (25% of portfolio)
@@ -27,7 +27,7 @@ ProShares Ultra Gold — 2x leveraged Gold
 |---|---|
 | Regime filter | GLD weekly close > GLD **100-week SMA** |
 | Re-entry signal | GLD weekly close > GLD **20-week SMA** |
-| Trailing stop | UGL drops **28%** from highest close since entry |
+| Trailing stop | UGL drops **28%** from peak price since entry (ratchets up only) |
 | Cash proxy | SGOV / T-bills when out |
 
 > Note: Both regime and re-entry for the UGL engine use GLD (unleveraged). UGL is only tracked for the trailing stop. This is intentional — leverage decay on UGL adds noise to trend signals; GLD is cleaner.
@@ -116,6 +116,7 @@ tripleedge/
 ├── bot.py                 # Local testing bot (infinite polling)
 ├── users.json             # Registered users and portfolio values
 ├── bot_offset.json        # Telegram update offset (GitHub Actions state)
+├── engine_state.json      # Per-engine position state (in_position, peak, entry)
 ├── requirements.txt       # Python dependencies
 │
 ├── .github/

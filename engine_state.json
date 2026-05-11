@@ -1,0 +1,18 @@
+{
+  "upro": {
+    "in_position": false,
+    "peak_price": null,
+    "entry_price": null,
+    "entry_date": null,
+    "last_action": null,
+    "last_updated": null
+  },
+  "ugl": {
+    "in_position": false,
+    "peak_price": null,
+    "entry_price": null,
+    "entry_date": null,
+    "last_action": null,
+    "last_updated": null
+  }
+}

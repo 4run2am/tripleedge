@@ -11,7 +11,7 @@ import os
 import json
 import time
 import requests
-from signal import fetch_data, compute_signal, format_message, load_users, save_users, send_telegram
+from signal import fetch_data, compute_signal_readonly, format_message, load_users, save_users, send_telegram
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 BASE_URL  = f"https://api.telegram.org/bot{BOT_TOKEN}"
@@ -51,7 +51,7 @@ def handle_command(chat_id, text, first_name):
         send_telegram(BOT_TOKEN, chat_id, "⏳ Fetching latest market data...")
         try:
             spy, upro, gld, ugl = fetch_data()
-            sig                 = compute_signal(spy, upro, gld, ugl)
+            sig                 = compute_signal_readonly(spy, upro, gld, ugl)
             portfolio_value     = users.get(str(chat_id), {}).get("portfolio_value")
             msg                 = format_message(sig, portfolio_value=portfolio_value, mode="status")
             send_telegram(BOT_TOKEN, chat_id, msg)
@@ -87,11 +87,11 @@ def handle_command(chat_id, text, first_name):
             "*UPRO Engine*\n"
             "  • SPY above 65-week SMA? (regime)\n"
             "  • UPRO above 10-week SMA? (re-entry)\n"
-            "  • UPRO within 22% of peak? (trailing stop)\n\n"
+            "  • UPRO within 22% of peak since entry? (trailing stop)\n\n"
             "*UGL Engine*\n"
             "  • GLD above 100-week SMA? (regime)\n"
             "  • GLD above 20-week SMA? (re-entry)\n"
-            "  • UGL within 28% of peak? (trailing stop)\n\n"
+            "  • UGL within 28% of peak since entry? (trailing stop)\n\n"
             "Signal: 🟢 HOLD · 🟡 WAIT · ⚪️ CASH · 🚨 SELL\n"
             "Cash goes to SGOV while sidelined (~5.2% yield)\n\n"
             "━━━━━━━━━━━━━━━━\n"
