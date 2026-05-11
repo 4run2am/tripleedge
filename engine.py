@@ -49,6 +49,8 @@ write back. This matches the research backtest logic exactly:
 import os
 import json
 import copy
+import math
+import tempfile
 import requests
 import pandas as pd
 from datetime import datetime, timezone, timedelta
@@ -74,16 +76,40 @@ TIINGO_BASE_URL = "https://api.tiingo.com/tiingo/daily"
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _atomic_write_json(path, data):
+    """Write JSON to disk atomically.
+
+    Writes to a temp file in the same directory, then renames. An interrupted
+    process therefore can never leave a half-written JSON file that would
+    cause loaders to fall back to default state.
+    """
+    dirpath = os.path.dirname(os.path.abspath(path)) or "."
+    fd, tmp = tempfile.mkstemp(prefix=os.path.basename(path) + ".", dir=dirpath)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def load_users():
     if not os.path.exists(USERS_FILE):
         return {}
-    with open(USERS_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(USERS_FILE, "r") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        # Corrupt file — return empty so we don't crash; will be rewritten.
+        return {}
 
 
 def save_users(users):
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=2)
+    _atomic_write_json(USERS_FILE, users)
 
 
 def default_engine_state():
@@ -127,8 +153,7 @@ def load_state():
 
 
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+    _atomic_write_json(STATE_FILE, state)
 
 
 def fetch_tiingo(ticker, api_key, start_date):
@@ -155,8 +180,10 @@ def fetch_data(api_key=None):
     """
     if api_key is None:
         api_key = os.environ.get("TIINGO_API_KEY")
+    if not api_key:
+        raise RuntimeError("TIINGO_API_KEY not set")
     # 220 weeks covers the 100-week UGL regime SMA plus warm-up buffer
-    start = (datetime.now() - timedelta(weeks=220)).strftime("%Y-%m-%d")
+    start = (datetime.now(timezone.utc) - timedelta(weeks=220)).strftime("%Y-%m-%d")
 
     print("  Fetching SPY...")
     spy  = fetch_tiingo("SPY",  api_key, start)
@@ -191,10 +218,26 @@ def _compute_engine_signal(
     Returns (signal_dict, new_engine_state).
     The caller decides whether to persist new_engine_state.
     """
+    # --- Warmup guard ---
+    if len(regime_series) < sma_regime:
+        raise ValueError(
+            f"Insufficient {regime_ticker} history for {sma_regime}-week SMA: "
+            f"got {len(regime_series)} bars"
+        )
+    if len(reentry_series) < sma_reentry:
+        raise ValueError(
+            f"Insufficient {reentry_ticker} history for {sma_reentry}-week SMA: "
+            f"got {len(reentry_series)} bars"
+        )
+
     # --- Compute regime ---
     reg_sma        = regime_series.rolling(sma_regime).mean()
     latest_reg     = float(regime_series.iloc[-1])
     latest_reg_sma = float(reg_sma.iloc[-1])
+    if math.isnan(latest_reg_sma):
+        raise ValueError(
+            f"{regime_ticker} {sma_regime}w SMA is NaN — data has gaps; aborting."
+        )
     regime_on      = latest_reg > latest_reg_sma
     reg_chg        = float((regime_series.iloc[-1] / regime_series.iloc[-2] - 1) * 100) if len(regime_series) > 1 else 0.0
 
@@ -202,6 +245,10 @@ def _compute_engine_signal(
     re_sma        = reentry_series.rolling(sma_reentry).mean()
     latest_re     = float(reentry_series.iloc[-1])
     latest_re_sma = float(re_sma.iloc[-1])
+    if math.isnan(latest_re_sma):
+        raise ValueError(
+            f"{reentry_ticker} {sma_reentry}w SMA is NaN — data has gaps; aborting."
+        )
     reentry_ok    = latest_re > latest_re_sma
     re_chg        = float((reentry_series.iloc[-1] / reentry_series.iloc[-2] - 1) * 100) if len(reentry_series) > 1 else 0.0
 
@@ -463,18 +510,22 @@ def run_weekly_signal():
     print(f"  GLD: {len(gld)} bars | UGL:  {len(ugl)} bars")
 
     state = load_state()
+
+    def _fmt(v):
+        return f"${v}" if v is not None else "—"
+
     print(f"Loaded state: UPRO in_position={state['upro']['in_position']} "
-          f"peak=${state['upro']['peak_price']} | "
+          f"peak={_fmt(state['upro']['peak_price'])} | "
           f"UGL in_position={state['ugl']['in_position']} "
-          f"peak=${state['ugl']['peak_price']}")
+          f"peak={_fmt(state['ugl']['peak_price'])}")
 
     sig, new_state = compute_signal(spy, upro, gld, ugl, state)
     u, g = sig["upro"], sig["ugl"]
 
     print(f"  UPRO ({u['action']}): regime_on={u['regime_on']} reentry_ok={u['reentry_ok']} "
-          f"in_pos={u['in_position']} peak=${u['peak_price']} stop=${u['stop_level']}")
+          f"in_pos={u['in_position']} peak={_fmt(u['peak_price'])} stop={_fmt(u['stop_level'])}")
     print(f"  UGL  ({g['action']}): regime_on={g['regime_on']} reentry_ok={g['reentry_ok']} "
-          f"in_pos={g['in_position']} peak=${g['peak_price']} stop=${g['stop_level']}")
+          f"in_pos={g['in_position']} peak={_fmt(g['peak_price'])} stop={_fmt(g['stop_level'])}")
 
     # Persist new state BEFORE sending messages so a partial send failure
     # doesn't lose the transition.

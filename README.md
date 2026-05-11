@@ -111,7 +111,7 @@ The mathematically optimal Calmar allocation was ~50% UPRO / 50% UGL. The 75/25 
 
 ```
 tripleedge/
-├── signal.py              # Signal engine — fetches data, computes UPRO + UGL signals
+├── engine.py              # Signal engine — fetches data, computes UPRO + UGL signals
 ├── bot_actions.py         # GitHub Actions bot (50-sec polling, handles commands)
 ├── bot.py                 # Local testing bot (infinite polling)
 ├── users.json             # Registered users and portfolio values
@@ -197,7 +197,7 @@ Message your bot `/start`, then `/setportfolio 30000`
 Every Monday 8am ET
        │
        ▼
-GitHub Actions → signal.py
+GitHub Actions → engine.py
        │
        ▼
 Fetches SPY, UPRO, GLD, UGL from Tiingo (weekly bars)

@@ -47,7 +47,7 @@ jobs:
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TIINGO_API_KEY: ${{ secrets.TIINGO_API_KEY }}
-        run: python signal.py
+        run: python engine.py
 
       - name: Commit updated engine state
         run: |

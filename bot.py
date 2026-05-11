@@ -8,13 +8,31 @@ Handles: /start, /status, /setportfolio, /help
 """
 
 import os
-import json
+import math
 import time
 import requests
-from signal import fetch_data, compute_signal_readonly, format_message, load_users, save_users, send_telegram
+from engine import (
+    fetch_data,
+    compute_signal_readonly,
+    format_message,
+    load_users,
+    save_users,
+    send_telegram,
+)
 
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 BASE_URL  = f"https://api.telegram.org/bot{BOT_TOKEN}"
+
+
+def _parse_portfolio_amount(raw):
+    amount = float(raw.replace(",", "").replace("$", ""))
+    if not math.isfinite(amount):
+        raise ValueError("amount must be finite")
+    if amount <= 0:
+        raise ValueError("amount must be positive")
+    if amount > 1e12:
+        raise ValueError("amount unreasonably large")
+    return amount
 
 
 def get_updates(offset=None):
@@ -65,7 +83,7 @@ def handle_command(chat_id, text, first_name):
                 "Usage: `/setportfolio 10000`\nEnter your total portfolio value in USD.")
         else:
             try:
-                amount = float(parts[1].replace(",", "").replace("$", ""))
+                amount = _parse_portfolio_amount(parts[1])
                 users[str(chat_id)]["portfolio_value"] = amount
                 save_users(users)
                 send_telegram(BOT_TOKEN, chat_id,
@@ -75,7 +93,7 @@ def handle_command(chat_id, text, first_name):
                     f"Shown in your weekly signals and /status readouts.")
             except ValueError:
                 send_telegram(BOT_TOKEN, chat_id,
-                    "❌ Invalid amount. Usage: `/setportfolio 10000`")
+                    "❌ Invalid amount. Use a positive number, e.g. `/setportfolio 10000`")
 
     elif text.startswith("/help"):
         msg = (
@@ -92,7 +110,7 @@ def handle_command(chat_id, text, first_name):
             "  • GLD above 100-week SMA? (regime)\n"
             "  • GLD above 20-week SMA? (re-entry)\n"
             "  • UGL within 28% of peak since entry? (trailing stop)\n\n"
-            "Signal: 🟢 HOLD · 🟡 WAIT · ⚪️ CASH · 🚨 SELL\n"
+            "Signal: 🟢 HOLD · 🔵 BUY · 🟡 WAIT · ⚪️ CASH · 🚨 SELL\n"
             "Cash goes to SGOV while sidelined (~5.2% yield)\n\n"
             "━━━━━━━━━━━━━━━━\n"
             "_TripleEdge · UPRO + UGL · Not financial advice_"
@@ -119,7 +137,10 @@ def run_bot():
                 text       = msg.get("text", "")
                 first_name = msg.get("from", {}).get("first_name", "there")
                 if text:
-                    handle_command(chat_id, text, first_name)
+                    try:
+                        handle_command(chat_id, text, first_name)
+                    except Exception as e:
+                        print(f"Error handling [{chat_id}] {text!r}: {e}")
         except Exception as e:
             print(f"Error: {e}")
             time.sleep(5)
