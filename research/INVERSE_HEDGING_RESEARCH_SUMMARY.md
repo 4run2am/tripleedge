@@ -1,5 +1,7 @@
 # TripleEdge Inverse Hedging Research Summary
 
+> **Numbers in this document are from the original research run (not refreshed).** The conclusion (inverse hedging strictly underperforms cash) is robust to the small CAGR drift that has occurred since — every inverse configuration was worse than baseline by margins much larger than the data-update noise. For current standalone engine numbers see `research/upro/UPRO_RESEARCH_SUMMARY.md` and `research/ugl/UGL_RESEARCH_SUMMARY.md` (refreshed 2026-05-29).
+
 ## What We Tested
 
 Tested whether rotating into inverse leveraged ETFs (SH/SDS/SPXU for S&P 500, PSQ/QID/SQQQ for Nasdaq-100) during TripleEdge "exit" periods improves risk-adjusted returns versus the baseline strategy of sitting in cash (SGOV/T-bills at ~5.2% annually).

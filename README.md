@@ -49,37 +49,51 @@ Park in **SGOV** (iShares 0-3 Month Treasury Bond ETF). Pays weekly dividends, e
 
 ## Backtest Results
 
-*Full period using synthetic data pre-inception + real data post-inception.*
+*Numbers below are point-in-time snapshots from re-running the research scripts on **2026-05-29**. They drift week-over-week as new market data accumulates. Re-run `research/upro/upro_winner_summary.py`, `research/ugl/ugl_winner_summary.py`, and `research/portfolio/portfolio_optimizer.py` to refresh.*
 
-### UPRO Engine (1996–present, 29 years)
+*Full period uses synthetic data pre-inception spliced with real data post-inception (UPRO inception June 2009, UGL inception December 2008).*
+
+### UPRO Engine (1996–2026, 29.4 years)
 | Metric | Value |
 |---|---|
-| CAGR | 24.6% |
+| CAGR | 25.2% |
 | Max Drawdown | -51.8% |
-| Sharpe Ratio | 0.67 |
-| Calmar Ratio | 0.47 |
+| Sharpe Ratio | 0.69 |
+| Sortino Ratio | 0.57 |
+| Calmar Ratio | 0.49 |
 | % Time in UPRO | 70% |
+| Trades | 49 |
 | Train CAGR (pre-2017) | 22.6% |
-| Test CAGR (2017+) | **28.4%** |
+| Test CAGR (2017+) | **30.5%** |
+| Train Sharpe / Test Sharpe | 0.63 / 0.80 |
 
-### UGL Engine (2000–present, 25 years)
+### UGL Engine (2000–2026, 25.7 years)
 | Metric | Value |
 |---|---|
-| CAGR | 17.6% |
+| CAGR | 17.4% |
 | Max Drawdown | -49.1% |
-| Sharpe Ratio | 0.54 |
-| Calmar Ratio | 0.36 |
+| Sharpe Ratio | 0.53 |
+| Sortino Ratio | 0.44 |
+| Calmar Ratio | 0.35 |
 | % Time in UGL | 71% |
+| Trades | 38 |
 | Train CAGR (pre-2016) | 20.9% |
-| Test CAGR (2016+) | 12.9% |
+| Test CAGR (2016+) | 12.5% |
+| Train Sharpe / Test Sharpe | 0.64 / 0.38 |
 
-### Combined Portfolio (75% UPRO / 25% UGL)
+### Combined Portfolio (75% UPRO / 25% UGL, common period 2000–2026)
 | Metric | Value |
 |---|---|
-| CAGR | ~23.9% |
-| Max Drawdown | ~-31.5% |
-| Sharpe Ratio | ~0.77 |
-| Calmar Ratio | ~0.76 |
+| CAGR | 24.4% |
+| Max Drawdown | -31.5% |
+| Sharpe Ratio | 0.78 |
+| Sortino Ratio | 0.72 |
+| Calmar Ratio | 0.77 |
+| Worst 1-yr | -29.3% |
+| Worst 3-yr | +15.3% |
+| Train CAGR (pre-2017) | 21.7% |
+| Test CAGR (2017+) | **28.8%** |
+| Test Sharpe | 0.87 |
 
 *The engines have near-zero correlation (0.08). When one is in a drawdown, the other is often not. UGL provides meaningful drawdown compression with minimal CAGR cost.*
 
@@ -89,9 +103,9 @@ Park in **SGOV** (iShares 0-3 Month Treasury Bond ETF). Pays weekly dividends, e
 
 The mathematically optimal Calmar allocation was ~50% UPRO / 50% UGL. The 75/25 choice is deliberate for this investor profile:
 
-- **+0.9% CAGR** compounds to ~$18M more over 30 years on a $30k starting balance
+- **Higher CAGR**: 24.4% (75/25) vs 23.0% (50/50) compounds to materially more over 30 years on a $30k starting balance
 - **DCA smooths drawdowns**: monthly contributions buy cheaper shares during pullbacks, reducing the psychological and financial impact of the -31.5% max drawdown
-- **UPRO's real test period CAGR (28.4%)** is more than double UGL's (12.9%) — the current regime favors the heavier UPRO weight
+- **UPRO's real test period CAGR (30.5%)** is more than double UGL's (12.5%) — the current regime favors the heavier UPRO weight
 - **At 21 years old**, time horizon is long enough to absorb higher drawdowns and let the extra CAGR compound
 
 ---

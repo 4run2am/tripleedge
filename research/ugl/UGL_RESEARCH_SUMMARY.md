@@ -1,5 +1,7 @@
 # TripleEdge UGL — Research Summary
 
+> **Numbers last refreshed: 2026-05-29** via `ugl_winner_summary.py`. Backtest metrics drift week-over-week as new market data accumulates. Sections marked "refreshed 2026-05-29" reflect the current run; other tables are from the original research run and not refreshed in this update.
+
 ## What We Built
 
 A systematic, weekly trend-following strategy for UGL (ProShares Ultra Gold, 2x daily Gold) using the same TripleEdge framework proven on TQQQ and UPRO. The strategy uses GLD (unleveraged gold) as the signal source for both regime filter and re-entry, with a 28% trailing stop on UGL. This is the uncorrelated diversification engine — gold moves on completely different macro drivers than US equities, and the weekly return correlation between this engine and the UPRO engine is only **0.081**.
@@ -21,30 +23,32 @@ A systematic, weekly trend-following strategy for UGL (ProShares Ultra Gold, 2x 
 
 ## Final Performance Table
 
+*TripleEdge UGL column refreshed **2026-05-29** via `ugl_winner_summary.py`. Benchmark columns are from an earlier run and not refreshed in this update.*
+
 | Metric | TripleEdge UGL | B&H UGL | B&H GLD | B&H SPY | TripleEdge TQQQ | TripleEdge UPRO |
 |---|---|---|---|---|---|---|
-| CAGR | **17.8%** | 16.9% | 11.3% | 7.8% | 20.8% | 24.2% |
+| CAGR | **17.4%** | 16.9% | 11.3% | 7.8% | 20.8% | 24.2% |
 | Max Drawdown | **-49.1%** | -75.0% | -44.7% | -54.6% | -46.5% | -40.4% |
-| Sharpe | **0.54** | 0.48 | 0.42 | 0.23 | 0.58 | 0.68 |
-| Sortino | 0.45 | 0.47 | 0.40 | 0.21 | 0.45 | 0.56 |
-| Calmar | **0.36** | 0.23 | 0.25 | 0.14 | 0.45 | 0.60 |
+| Sharpe | **0.53** | 0.48 | 0.42 | 0.23 | 0.58 | 0.68 |
+| Sortino | 0.44 | 0.47 | 0.40 | 0.21 | 0.45 | 0.56 |
+| Calmar | **0.35** | 0.23 | 0.25 | 0.14 | 0.45 | 0.60 |
 | Ulcer Index | 0.284 | 0.414 | 0.188 | 0.162 | 0.188 | 0.158 |
-| UPI | 0.44 | 0.28 | 0.32 | 0.16 | 0.83 | 1.20 |
+| UPI | 0.43 | 0.28 | 0.32 | 0.16 | 0.83 | 1.20 |
 | Worst 1yr | -40.0% | -53.0% | -29.3% | -45.6% | -35.8% | -36.7% |
 | Worst 3yr | -42.9% | -67.2% | -39.2% | -43.1% | -29.6% | +11.8% |
-| % 3yr Negative | 24.2% | 25.5% | 17.7% | 14.6% | 5.9% | 0.0% |
+| % 3yr Negative | 24.1% | 25.5% | 17.7% | 14.6% | 5.9% | 0.0% |
 | Recovery (weeks) | 67 | 481 | 244 | 180 | 22 | 65 |
-| Trades | 37 | 0 | 0 | 0 | 136 | 38 |
+| Trades | 38 | 0 | 0 | 0 | 136 | 38 |
 | % Time Invested | 71% | 100% | 100% | 100% | 55% | 72% |
-| Total Return | 66.4x | 54.4x | 15.4x | 6.8x | 125.9x | 259.6x |
+| Total Return | 62.4x | 54.4x | 15.4x | 6.8x | 125.9x | 259.6x |
 | Train CAGR | 20.9% | 13.4% | 8.9% | 3.9% | 12.3% | 21.6% |
-| Test CAGR | 13.3% | 22.7% | 15.1% | 13.9% | 34.7% | 28.4% |
+| Test CAGR | 12.5% | 22.7% | 15.1% | 13.9% | 34.7% | 28.4% |
 | Train Sharpe | 0.64 | 0.39 | 0.28 | 0.02 | 0.37 | 0.64 |
-| Test Sharpe | 0.40 | 0.64 | 0.65 | 0.55 | 0.82 | 0.75 |
+| Test Sharpe | 0.38 | 0.64 | 0.65 | 0.55 | 0.82 | 0.75 |
 
-*All benchmarks run over the same date range: 2000-09 to 2026-04 (~25.6 years)*
+*All benchmarks run over the same date range: 2000-09 to 2026-05 (~25.7 years)*
 
-**Key takeaway:** TripleEdge UGL turns a 75% max drawdown instrument into one with -49% max drawdown while capturing nearly all the upside (66.4x vs 54.4x total return). The strategy beats B&H UGL on every risk-adjusted metric. Compared to the equity engines, the absolute CAGR is lower (17.8% vs 24.2%) — but the diversification value is where the real payoff lives (see Correlation section below).
+**Key takeaway:** TripleEdge UGL turns a 75% max drawdown instrument into one with -49% max drawdown while capturing nearly all the upside (62.4x vs 54.4x total return). The strategy beats B&H UGL on every risk-adjusted metric. Compared to the equity engines, the absolute CAGR is lower (17.4% vs 24.2%) — but the diversification value is where the real payoff lives (see Correlation section below).
 
 ## DCA Comparison ($500/week)
 
@@ -88,7 +92,7 @@ A systematic, weekly trend-following strategy for UGL (ProShares Ultra Gold, 2x 
 4. **28% trailing stop is very wide.** This reflects gold's tendency to have deep intermediate pullbacks within secular bull markets. A tight stop would whipsaw constantly. The 28% stop lets UGL breathe while still protecting against the 2011-2015 type bear market. For comparison: TQQQ uses 10%, UPRO uses 22%.
 
 5. **Two distinct winning archetypes emerged:**
-   - **High-CAGR / wide-stop:** R100 GLD SMA20 28% stop → 17.8% CAGR, -49.1% MaxDD (THE WINNER)
+   - **High-CAGR / wide-stop:** R100 GLD SMA20 28% stop → 17.4% CAGR, -49.1% MaxDD (THE WINNER, refreshed 2026-05-29)
    - **Low-DD / tight-stop:** R40-50 UGL SMA25 6% stop → 13.3% CAGR, -36.9% MaxDD (frequent trading, lower returns)
 
 6. **4 combinations appeared in both top-20 Calmar AND top-20 Sharpe lists** — all centered around the 100-125w regime with 20-30w re-entry and 28-30% stops. Strong cross-metric agreement.
@@ -101,7 +105,7 @@ A systematic, weekly trend-following strategy for UGL (ProShares Ultra Gold, 2x 
 | 40w | UGL 25w | 6% | 13.3% | -36.9% | 0.42 | 0.36 | 214 |
 | 50w | UGL 25w | 6% | 13.5% | -37.7% | 0.43 | 0.36 | 212 |
 | 55w | GLD 5w | 28% | 16.2% | -47.0% | 0.49 | 0.34 | 67 |
-| **100w** | **GLD 20w** | **28%** | **17.8%** | **-49.1%** | **0.54** | **0.36** | **37** |
+| **100w** | **GLD 20w** | **28%** | **17.4%** | **-49.1%** | **0.53** | **0.35** | **38** |
 | 125w | GLD 20w | 28% | 17.0% | -51.0% | 0.52 | 0.33 | 29 |
 | 200w | GLD 25w | 18% | 15.7% | -52.1% | 0.50 | 0.30 | 43 |
 
@@ -150,13 +154,13 @@ The 2012-2016 period (gold bear market) is weak as expected — Sharpe of 0.00, 
 | **Re-entry** | TQQQ > 10w SMA | UPRO > 10w SMA | GLD > 20w SMA |
 | **Re-entry source** | Leveraged ETF | Leveraged ETF | **Unleveraged (GLD)** |
 | **Trailing stop** | 10% | 22% | **28%** |
-| **CAGR** | 22.4% | 24.1% | 17.8% |
+| **CAGR** | 22.4% | 25.2% | 17.4% |
 | **Max DD** | -46.5% | -51.8% | -49.1% |
-| **Sharpe** | 0.50 | 0.66 | 0.54 |
-| **Calmar** | 0.48 | 0.46 | 0.36 |
-| **Train/Test Sharpe** | 0.37 | 0.88 | 1.58 |
-| **Trades** | ~136 | ~38 | 37 |
-| **% Time invested** | 55% | 72% | 71% |
+| **Sharpe** | 0.50 | 0.69 | 0.53 |
+| **Calmar** | 0.48 | 0.49 | 0.35 |
+| **Train/Test Sharpe** | 0.37 | 0.79 | 1.68 |
+| **Trades** | ~136 | 49 | 38 |
+| **% Time invested** | 55% | 70% | 71% |
 
 **Why gold's optimal setup differs:**
 
@@ -209,9 +213,11 @@ The yearly averages confirm persistently low correlation:
 | Custom (50 TQQQ / 30 UPRO / 20 UGL) | 23.7% | -30.3% | 0.76 | 0.78 | 231.0x |
 | Equity heavy (40/40/20) | 24.0% | -30.6% | 0.78 | 0.79 | 248.8x |
 | Gold tilt (25/25/50) | 23.2% | -23.4% | 0.85 | 0.99 | 207.7x |
-| Solo UGL | 17.8% | -49.1% | 0.54 | 0.36 | 66.4x |
+| Solo UGL | 17.4% | -49.1% | 0.53 | 0.35 | 62.4x |
 | Solo TQQQ | 20.8% | -46.5% | 0.57 | 0.45 | 125.9x |
-| Solo UPRO | 24.2% | -40.4% | 0.68 | 0.60 | 259.6x |
+| Solo UPRO | 24.1% | -40.4% | 0.68 | 0.60 | 260.9x |
+
+*Solo-engine rows refreshed 2026-05-29. Multi-engine rows (top 4) are from the 3-engine portfolio search and not refreshed in this update.*
 
 **The equal-weight portfolio is the standout:** 23.9% CAGR with only -26.1% max drawdown and 0.92 Calmar. Compare this to the best solo engine (UPRO: 0.60 Calmar) — the diversification benefit nearly doubles the risk-adjusted return. The gold tilt (50% UGL) achieves the lowest drawdown (-23.4%) with a near-1.0 Calmar, at the cost of slightly lower CAGR.
 
@@ -225,7 +231,7 @@ Stocks have an inherent long-term upward drift (~10%/yr) because companies gener
 
 2. **Cash earning 5.2% is competitive with gold.** During gold's flat/down periods, parking in T-bills isn't just protection — it's an alpha source. The strategy earned ~5% while gold went nowhere for 7 years.
 
-3. **Standalone CAGR expectations should be modest.** A 17.8% CAGR from a 2x gold strategy is genuinely impressive given gold's underlying return profile. Don't judge this engine by comparing it to the 24% CAGR of the 3x equity engines.
+3. **Standalone CAGR expectations should be modest.** A 17.4% CAGR from a 2x gold strategy is genuinely impressive given gold's underlying return profile. Don't judge this engine by comparing it to the 24-25% CAGR of the 3x equity engines.
 
 ### When this engine shines vs struggles
 
@@ -251,7 +257,7 @@ The 28% trailing stop and 100-week regime filter are calibrated for gold's slow-
 - **Synthetic GLD (pre-2004):** Built from gold futures (GC=F), normalized to match GLD at inception. Correlation with real GLD: **1.0000** (expected — GLD directly tracks gold price).
 - **Synthetic UGL (pre-2008):** Built from 2x daily GLD returns, compounded. Correlation with real UGL: **0.9773**. Tracking error: 24.55%. Drift ratio: 1.96x (synthetic drifts upward vs real due to leverage decay in real UGL).
 
-The synthetic UGL correlation of 0.977 is acceptable but the drift is significant — the backtest before 2008 overstates UGL's performance relative to what the real product would have delivered (because the synthetic doesn't capture the friction, tracking error, and expense ratio of the real ETF). This means the ~20.9% train CAGR (pre-2016) is likely optimistic. The 13.3% test CAGR (mostly real data) is more representative of future expectations.
+The synthetic UGL correlation of 0.977 is acceptable but the drift is significant — the backtest before 2008 overstates UGL's performance relative to what the real product would have delivered (because the synthetic doesn't capture the friction, tracking error, and expense ratio of the real ETF). This means the ~20.9% train CAGR (pre-2016) is likely optimistic. The 12.5% test CAGR (mostly real data, refreshed 2026-05-29) is more representative of future expectations.
 
 ### Backtest Date Range
 

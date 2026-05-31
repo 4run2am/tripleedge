@@ -32,18 +32,20 @@ TripleEdge runs two uncorrelated systematic engines in parallel: **75% UPRO** (3
 
 ## Realistic Performance Expectations
 
+*All numeric claims below are sourced from the actual research scripts (`research/upro/upro_winner_summary.py`, `research/ugl/ugl_winner_summary.py`, `research/portfolio/portfolio_optimizer.py`) as of **2026-05-29**. Re-run those scripts to refresh.*
+
 After correcting for synthetic-data inflation, expense ratios, leverage friction, and tax drag, here's the honest range:
 
 | Account Type | Expected CAGR | Expected Max Drawdown |
 |---|---|---|
-| **Roth IRA / 401k (no tax)** | 20-22% | -31% |
-| **Taxable account** | 16-19% | -31% |
+| **Roth IRA / 401k (no tax)** | 21-23% | -31% |
+| **Taxable account** | 17-20% | -31% |
 
 **For comparison (same accounts, after-tax):**
 
 | Strategy | Roth/401k CAGR | Taxable CAGR |
 |---|---|---|
-| TripleEdge 75/25 | 20-22% | 16-19% |
+| TripleEdge 75/25 | 21-23% | 17-20% |
 | Value investing (well-executed) | 12-15% | 10-13% |
 | SPY DCA | 10% | 8.5% |
 | Retail trading (median) | -3 to +5% | -5 to +3% |
@@ -52,7 +54,7 @@ After correcting for synthetic-data inflation, expense ratios, leverage friction
 
 ## Honest Adjustments: Fees, Synthetic Data, and Taxes
 
-The headline backtest numbers (24.6% UPRO, 17.6% UGL, 23.9% combined) require three honest adjustments before they reflect what you'll actually earn.
+The headline backtest numbers as of **2026-05-29** (25.2% UPRO standalone, 17.4% UGL standalone, 24.4% combined 75/25) require three honest adjustments before they reflect what you'll actually earn.
 
 ### 1. Synthetic Data Inflation
 
@@ -85,13 +87,13 @@ That drift = ~5% per year of synthetic outperformance from missing fees + levera
 
 | Metric | Reported | Realistic |
 |---|---|---|
-| UPRO Engine full-period | 24.6% | ~21-22% |
-| UGL Engine full-period | 17.6% | ~14-15% |
-| Combined 75/25 | 23.9% | ~20-21% |
+| UPRO Engine full-period | 25.2% | ~22-23% |
+| UGL Engine full-period | 17.4% | ~14-15% |
+| Combined 75/25 | 24.4% | ~21-22% |
 
 **Anchor expectations to the test-period numbers**, which use 100% real ETF data:
-- UPRO test (2017+): **28.4%** — clean
-- UGL test (2016+): **12.9%** — clean
+- UPRO test (2017+): **30.5%** — clean
+- UGL test (2016+): **12.5%** — clean
 
 ### 2. Tax Drag (Taxable Account Only)
 
@@ -131,7 +133,7 @@ In a taxable account, TripleEdge realizes gains regularly while SPY DCA defers t
 Two reasons, both legitimate:
 
 1. **Signal logic is fee-insensitive** — entry/exit triggers fire on SMA crosses and trailing stops, which are invariant to a constant ~2%/yr drag. Fee-adjusting wouldn't change which trades fire.
-2. **Test period validation is honest** — the research deliberately validates on out-of-sample post-inception data (real ETF prices, real fees baked in). The 28.4% UPRO test CAGR and 12.9% UGL test CAGR are clean.
+2. **Test period validation is honest** — the research deliberately validates on out-of-sample post-inception data (real ETF prices, real fees baked in). The 30.5% UPRO test CAGR and 12.5% UGL test CAGR are clean.
 
 **Bottom line: discount full-period CAGR by ~2-3% for a realistic gross figure, then apply tax drag.**
 
