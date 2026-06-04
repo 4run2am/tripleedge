@@ -205,3 +205,11 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ── Alpaca paper-trading bot — NEVER commit these ─────────────────────────────
+# .env already covered above; add bot runtime state + logs
+bot/state/
+bot/logs/
+state/
+logs/
+*.alpaca.json

@@ -127,7 +127,8 @@ The mathematically optimal Calmar allocation was ~50% UPRO / 50% UGL. The 75/25 
 tripleedge/
 ├── engine.py              # Signal engine — fetches data, computes UPRO + UGL signals
 ├── bot_actions.py         # GitHub Actions bot (50-sec polling, handles commands)
-├── bot.py                 # Local testing bot (infinite polling)
+├── telegram_bot.py        # Local Telegram bot (infinite polling, for testing)
+├── bot/                   # Alpaca paper-trading bot (out-of-sample validation)
 ├── users.json             # Registered users and portfolio values
 ├── bot_offset.json        # Telegram update offset (GitHub Actions state)
 ├── engine_state.json      # Per-engine position state (in_position, peak, entry)
