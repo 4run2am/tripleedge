@@ -5,14 +5,14 @@
     "entry_price": 139.73,
     "entry_date": "2026-05-18",
     "last_action": "HOLD",
-    "last_updated": "2026-08-17"
+    "last_updated": "2026-08-24"
   },
   "ugl": {
-    "in_position": false,
-    "peak_price": null,
-    "entry_price": null,
-    "entry_date": null,
-    "last_action": "WAIT",
-    "last_updated": "2026-08-17"
+    "in_position": true,
+    "peak_price": 57.09,
+    "entry_price": 57.09,
+    "entry_date": "2026-08-24",
+    "last_action": "BUY",
+    "last_updated": "2026-08-24"
   }
 }
