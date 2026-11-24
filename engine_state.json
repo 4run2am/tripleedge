@@ -1,11 +1,11 @@
 {
   "upro": {
-    "in_position": true,
-    "peak_price": 156.63,
-    "entry_price": 139.73,
-    "entry_date": "2026-05-18",
-    "last_action": "HOLD",
-    "last_updated": "2026-11-16"
+    "in_position": false,
+    "peak_price": null,
+    "entry_price": null,
+    "entry_date": null,
+    "last_action": "SELL",
+    "last_updated": "2026-11-24"
   },
   "ugl": {
     "in_position": false,
@@ -13,6 +13,6 @@
     "entry_price": null,
     "entry_date": null,
     "last_action": "CASH",
-    "last_updated": "2026-11-16"
+    "last_updated": "2026-11-24"
   }
 }
